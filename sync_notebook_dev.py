@@ -2140,6 +2140,12 @@ def assert_no_detached_records():
         if "A_UID" in item["fields"]:
             ids_to_check.add(item["id"])
     print(f"Found {len(ids_to_check)} records in Airtable.")
+    
+    # DEV: Handle empty case (no records to check)
+    if not ids_to_check:
+        print("No records to check - skipping detached records check")
+        return
+    
     airtable_ids_str = ",".join(f"'{id}'" for id in ids_to_check)
     ids_exist = spark.sql(
         f"""

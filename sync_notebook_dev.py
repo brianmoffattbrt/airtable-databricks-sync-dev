@@ -31,7 +31,24 @@ import urllib.parse
 # Airtable Configuration - DEV TABLE
 AIRTABLE_BASE_ID = "app1jXoB1g13R9iOl"  # Triage Tool Prototype
 AIRTABLE_DEV_TABLE_ID = "tblFp0tXA3YOJGjMo"  # Demotions_DatabricksSync_Dev
-AIRTABLE_TOKEN = dbutils.secrets.get(scope="andras.nagy@bluerivertech.com", key="AIRTABLE_TOKEN")
+
+# Try multiple secret scopes (in order of preference)
+def get_airtable_token():
+    scopes_to_try = [
+        "brian.moffatt@bluerivertech.com",
+        "andras.nagy@bluerivertech.com", 
+        "airtable-sync",
+        "jfa-triage"
+    ]
+    for scope in scopes_to_try:
+        try:
+            return dbutils.secrets.get(scope=scope, key="AIRTABLE_TOKEN")
+        except Exception as e:
+            print(f"Could not access scope {scope}: {e}")
+            continue
+    raise Exception("No accessible secrets scope found with AIRTABLE_TOKEN")
+
+AIRTABLE_TOKEN = get_airtable_token()
 
 # Reference table IDs
 HALT_CODES_TABLE_ID = 'tblN8uu4Gl1eDZMLs'

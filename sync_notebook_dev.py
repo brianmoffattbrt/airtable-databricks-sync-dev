@@ -395,15 +395,22 @@ def delete_expired_temp_tables():
     temp_tables_path_formatted = TEMP_TABLES_PATH[:-1]  # TEMP_TABLES_PATH ENV ends with dot
     output_table_data = spark.sql(f'SHOW TABLES IN {temp_tables_path_formatted}')
     for table_name in output_table_data.collect():
-        demotion_datetime = datetime.strptime(table_name['tableName'][-19:], "%Y_%m_%d_%H_%M_%S")
-        formatted_datetime = demotion_datetime.strftime("%Y-%m-%d %H:%M:%S")
-        parsed_datetime = datetime.strptime(formatted_datetime, "%Y-%m-%d %H:%M:%S")
-        current_datetime = datetime.now()
-        time_difference = current_datetime - parsed_datetime
-        if time_difference.days > DAYS_TO_EXPIRE:
-            spark.sql(f'DROP TABLE IF EXISTS {TEMP_TABLES_PATH}{table_name["tableName"]}')
-            print(f'{table_name["tableName"]} was deleted')
-            deleted_tables.append(table_name["tableName"])
+        # DEV: Only process tables that start with "demotion_context_" (temp sync tables)
+        if not table_name['tableName'].startswith('demotion_context_'):
+            continue
+        try:
+            demotion_datetime = datetime.strptime(table_name['tableName'][-19:], "%Y_%m_%d_%H_%M_%S")
+            formatted_datetime = demotion_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            parsed_datetime = datetime.strptime(formatted_datetime, "%Y-%m-%d %H:%M:%S")
+            current_datetime = datetime.now()
+            time_difference = current_datetime - parsed_datetime
+            if time_difference.days > DAYS_TO_EXPIRE:
+                spark.sql(f'DROP TABLE IF EXISTS {TEMP_TABLES_PATH}{table_name["tableName"]}')
+                print(f'{table_name["tableName"]} was deleted')
+                deleted_tables.append(table_name["tableName"])
+        except ValueError:
+            # Skip tables that don't match the expected format
+            continue
     return deleted_tables
 
 

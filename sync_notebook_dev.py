@@ -406,32 +406,43 @@ def push_to_airtable(demotions_df, batch_size: int = 10):
             vin = row_dict.get('vin')
             vin_link = [vin_mapping[vin]] if vin and vin in vin_mapping else []
             
-            record = {
-                "fields": {
-                    "A_UID": a_uid,
-                    "VIN": vin,
-                    "Bundle": row_dict.get('bundle'),
-                    "Halt Code - Import": halt_code,
-                    "Halt Code - Linked": [halt_code_id] if halt_code_id else [],
-                    "From State": convert_to_string_or_none(row_dict.get('from_state')),
-                    "To State": convert_to_string_or_none(row_dict.get('to_state')),
-                    "Spark URL": row_dict.get('sparkai_url') or '',
-                    "Foxglove URL": row_dict.get('foxglove_url'),
-                    "Timestamp UTC": safe_timestamp_format(row_dict.get('timestamp_utc')),
-                    "Map pre-signed URL": row_dict.get('map_presigned_url'),
-                    "Pilot VINs Linked": vin_link,
-                    "Demotion Occurrence": row_dict.get('demotion_occurrence'),
-                    "demotions": 1,
-                }
+            # Build fields dict, only including non-None values
+            fields = {
+                "A_UID": a_uid,
+                "VIN": vin,
             }
             
-            # Add optional fields if present
+            # Add optional fields only if they have values
+            if row_dict.get('bundle'):
+                fields["Bundle"] = row_dict.get('bundle')
+            if halt_code:
+                fields["Halt Code - Import"] = halt_code
+            if halt_code_id:
+                fields["Halt Code - Linked"] = [halt_code_id]
+            if row_dict.get('from_state') is not None:
+                fields["From State"] = str(row_dict.get('from_state'))
+            if row_dict.get('to_state') is not None:
+                fields["To State"] = str(row_dict.get('to_state'))
+            if row_dict.get('sparkai_url'):
+                fields["Spark URL"] = row_dict.get('sparkai_url')
+            if row_dict.get('foxglove_url'):
+                fields["Foxglove URL"] = row_dict.get('foxglove_url')
+            if row_dict.get('timestamp_utc'):
+                fields["Timestamp UTC"] = safe_timestamp_format(row_dict.get('timestamp_utc'))
+            if row_dict.get('map_presigned_url'):
+                fields["Map pre-signed URL"] = row_dict.get('map_presigned_url')
+            if vin_link:  # Only add if non-empty
+                fields["Pilot VINs Linked"] = vin_link
+            if row_dict.get('demotion_occurrence'):
+                fields["Demotion Occurrence"] = row_dict.get('demotion_occurrence')
             if row_dict.get('latitude'):
-                record["fields"]["latitude"] = row_dict.get('latitude')
+                fields["latitude"] = float(row_dict.get('latitude'))
             if row_dict.get('longitude'):
-                record["fields"]["longitude"] = row_dict.get('longitude')
+                fields["longitude"] = float(row_dict.get('longitude'))
             if row_dict.get('genos_version'):
-                record["fields"]["genos_version"] = row_dict.get('genos_version')
+                fields["genos_version"] = row_dict.get('genos_version')
+            
+            record = {"fields": fields}
             
             payload["records"].append(record)
         
@@ -506,9 +517,9 @@ def pull_from_airtable(limit: int = 500):
     """Pull triage results from Airtable dev table."""
     print(f"Fetching records from Airtable dev table (limit: {limit})...")
     
-    # Filter to recent records (last 30 days)
-    formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'days') < 30"
-    records = get_airtable_data(AIRTABLE_DEV_TABLE_ID, limit=limit, formula=formula)
+    # Don't filter - just get all records (dev table should be small)
+    # The DATETIME_DIFF formula was causing issues with the date format
+    records = get_airtable_data(AIRTABLE_DEV_TABLE_ID, limit=limit, formula=None)
     print(f"Fetched {len(records)} records from Airtable")
     
     if not records:

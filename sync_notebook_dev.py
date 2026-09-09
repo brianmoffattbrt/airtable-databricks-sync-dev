@@ -1697,7 +1697,12 @@ def get_unique_map_presigned_urls():
     return presigned_url_data
 
 def patch_pre_signed_to_airtable():
-    joined_data = get_unique_map_presigned_urls()
+    # DEV: Skip if presigned URL view doesn't exist
+    try:
+        joined_data = get_unique_map_presigned_urls()
+    except Exception as e:
+        print(f"WARNING: Skipping patch_pre_signed_to_airtable - presigned URL view not available: {e}")
+        return
     records = []
     for row in joined_data.collect():
         fields = {

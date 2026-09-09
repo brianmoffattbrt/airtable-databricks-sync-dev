@@ -315,7 +315,7 @@ def create_demotion_triage_full_table():
 
 # COMMAND ----------
 
-def get_all_airtable_records(limit=20):
+def get_all_airtable_records(limit=100):
     """
     Pull records from Airtable with ALL fields.
     DEV: Limited to small batch for testing.

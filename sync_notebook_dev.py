@@ -46,7 +46,13 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
     LongType, DayTimeIntervalType, ArrayType, FloatType, BooleanType
 from pprint import pprint
 from requests import request
-import keyforge
+# keyforge is optional - used for VIN hashing, but doesn't work in serverless mode
+try:
+    import keyforge
+    KEYFORGE_AVAILABLE = True
+except ImportError:
+    KEYFORGE_AVAILABLE = False
+    print("WARNING: keyforge not available - VIN hashing will be skipped")
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, wait_fixed
 import time
 import urllib.parse
@@ -70,7 +76,15 @@ AIRTABLE_TOKEN = dbutils.secrets.get(scope="brian.moffatt@bluerivertech.com", ke
 # ============================================================================
 AIRTABLE_URL = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}'
 AIRTABLE_URL_GET = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}'
-KEYFORGE_TOKEN = keyforge.get_token(cache_token_allowed=False).access_token
+# keyforge token - optional, used for VIN hashing
+try:
+    if KEYFORGE_AVAILABLE:
+        KEYFORGE_TOKEN = keyforge.get_token(cache_token_allowed=False).access_token
+    else:
+        KEYFORGE_TOKEN = None
+except Exception as e:
+    print(f"WARNING: Could not get keyforge token: {e}")
+    KEYFORGE_TOKEN = None
 HALT_CODES_TABLE_ID = 'tblN8uu4Gl1eDZMLs'
 DEMOTION_REASONS_TABLE_ID = 'tblINqDuMCUehLzgj'
 JIRA_JRM_SCRUM_BOARD_SYNC_TABLE_ID = 'tbllaxeplHp2Jmrw6'
@@ -105,6 +119,9 @@ def hash_vin(value, *args):
     Returns:
         str|list[str]: The hash of the string or list of hashed strings.
     """
+    # DEV: Skip hashing if keyforge not available
+    if KEYFORGE_TOKEN is None:
+        return value
     if not is_valid_vin(value):
         return value
     params = {"data": value if len(args) == 0 else [value, *args]}

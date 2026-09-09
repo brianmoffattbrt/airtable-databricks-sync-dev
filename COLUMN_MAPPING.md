@@ -1,6 +1,17 @@
 # Column Mapping Reference
 
-This document tracks which Airtable columns are synced to Databricks in the dev sync job.
+This document tracks which Airtable columns are synced in the **bidirectional** dev sync job.
+
+## Sync Architecture
+
+```
+demotions_stops_hours (prod)     Demotions_DatabricksSync_Dev (AT)     demotion_context_dev (DBX)
+         |                                    |                                   |
+         +---------> DBX_TO_AT push --------->+                                   |
+                                              +<-------- AT_TO_DBX pull ----------+
+                                              |                                   |
+                                              +---------> merge ----------------->+
+```
 
 ## How to Test Column Removal
 
@@ -8,6 +19,7 @@ This document tracks which Airtable columns are synced to Databricks in the dev 
 2. **Comment out the column** in `sync_notebook_dev.py` under `COLUMN_MAPPING`
 3. **Run the sync** and verify it completes without errors
 4. **Check the data** in `jupiter_dev.brianm.demotion_context_dev`
+5. **If successful**, coordinate with Jackson team to apply same change to prod
 
 ---
 

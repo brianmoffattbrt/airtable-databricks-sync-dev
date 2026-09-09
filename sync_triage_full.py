@@ -315,20 +315,22 @@ def create_demotion_triage_full_table():
 
 # COMMAND ----------
 
-def get_all_airtable_records(limit=20000):
+def get_all_airtable_records(limit=20):
     """
-    Pull ALL records from Airtable with ALL fields.
-    Uses pagination to handle large datasets.
+    Pull records from Airtable with ALL fields.
+    DEV: Limited to small batch for testing.
     """
     headers = {"Authorization": f"Bearer {AIRTABLE_TOKEN}"}
     complete_response = []
     offset = None
     
-    # DEV: No filter - sync all records from dev table
-    # Production would use: formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'months') < 6"
+    # DEV: Small batch for testing - just pull 'limit' records
+    # Production would use pagination and date filter
     
     while True:
-        url = f"{AIRTABLE_URL}?maxRecords=100"
+        # Limit to small batch for testing
+        batch_size = min(limit - len(complete_response), 100)
+        url = f"{AIRTABLE_URL}?maxRecords={batch_size}"
         if offset:
             url += f"&offset={offset}"
         

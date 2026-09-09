@@ -218,7 +218,25 @@ df.write.mode("overwrite").saveAsTable("demotion_triage_full")
 ## Next Steps
 
 1. ✅ Create `demotion_triage_full` table in dev
-2. ⏳ Update sync to pull ALL fields and populate table
-3. ⏳ Verify data integrity
+2. ✅ Update sync to pull ALL fields and populate table
+3. ✅ Verify data integrity
 4. ⏳ Update dashboards to use new table for process metrics
 5. ⏳ Plan production rollout
+
+## Column Cleanup Backlog
+
+Columns that need sync code changes before deletion:
+
+| Column | Reason | Data Usage | Action Needed |
+|--------|--------|------------|---------------|
+| `Secondary Demotion Auto` | Barely used (0.08% of records) | 285 of 375,492 records | Remove from sync code, then delete |
+
+## Columns Successfully Deleted (Dev Testing)
+
+| Column | Date Deleted | Sync Status |
+|--------|--------------|-------------|
+| Halt Code Investigation Guide | 2026-09-09 | ✅ Sync works |
+| InOrbit URL | 2026-09-09 | ✅ Sync works |
+| Other SparkAI URL | 2026-09-09 | ✅ Sync works |
+| Spark URL | 2026-09-09 | ✅ Sync works |
+| Autonomy state transition history | 2026-09-09 | ✅ Sync works |

@@ -324,12 +324,11 @@ def get_all_airtable_records(limit=20000):
     complete_response = []
     offset = None
     
-    # Filter to last 6 months (same as main sync)
-    formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'months') < 6"
-    formula_encoded = urllib.parse.quote(formula)
+    # DEV: No filter - sync all records from dev table
+    # Production would use: formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'months') < 6"
     
     while True:
-        url = f"{AIRTABLE_URL}?maxRecords=100&filterByFormula={formula_encoded}"
+        url = f"{AIRTABLE_URL}?maxRecords=100"
         if offset:
             url += f"&offset={offset}"
         

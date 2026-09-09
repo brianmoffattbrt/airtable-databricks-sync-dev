@@ -63,8 +63,8 @@ AIRTABLE_TABLE_NAME = "Demotions_DatabricksSync_Dev"  # Dev Airtable table name
 AIRTABLE_BASE_ID = "app1jXoB1g13R9iOl"  # Same base (Triage Tool Prototype)
 AIRTABLE_TABLE_ID = "tblFp0tXA3YOJGjMo"  # DEV TABLE: Demotions_DatabricksSync_Dev
 DEMOTION_CONTEXT_TABLE = "jupiter_dev.brianm.demotion_context_dev"  # DEV Databricks table
-ROUTE_AROUND_CONTEXT_TABLE = dbutils.secrets.get(scope="andras.nagy@bluerivertech.com", key="ROUTE_AROUND_CONTEXT_TABLE")  # Keep prod (not testing this)
-ROUTE_AROUND_TABLE_ID = dbutils.secrets.get(scope="andras.nagy@bluerivertech.com", key="ROUTE_AROUND_TABLE_ID")  # Keep prod (not testing this)
+ROUTE_AROUND_CONTEXT_TABLE = "jupiter_prod.jfa_metrics.route_around_context"  # Hardcoded - not testing route_around
+ROUTE_AROUND_TABLE_ID = "tblskQyDwIb2kbOl0"  # Hardcoded - not testing route_around
 DEMOTIONS_STOP_HOURS_TABLE = "jupiter_prod.jfa_metrics.demotions_stops_hours"  # Read from prod source
 AIRTABLE_TOKEN = dbutils.secrets.get(scope="brian.moffatt@bluerivertech.com", key="AIRTABLE_TOKEN")  # Use Brian's token
 # ============================================================================

@@ -1,11 +1,16 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Airtable → Databricks Sync (DEV)
+# MAGIC # Airtable <-> Databricks Sync (DEV)
 # MAGIC 
-# MAGIC Development sync job for testing schema changes.
+# MAGIC **BIDIRECTIONAL** development sync job for testing schema changes.
 # MAGIC 
-# MAGIC **Source:** Airtable `Demotions_DatabricksSync_Dev` (tblFp0tXA3YOJGjMo)
-# MAGIC **Target:** Databricks `jupiter_dev.brianm.demotion_context_dev`
+# MAGIC - **Source Airtable:** `Demotions_DatabricksSync_Dev` (tblFp0tXA3YOJGjMo)
+# MAGIC - **Target Databricks:** `jupiter_dev.brianm.demotion_context_dev`
+# MAGIC - **Source Data:** `jupiter_prod.jfa_metrics.demotions_stops_hours` (read-only)
+# MAGIC 
+# MAGIC ## Sync Flow
+# MAGIC 1. DBX -> Airtable: Push new demotions to dev Airtable table
+# MAGIC 2. Airtable -> DBX: Pull triage results back to dev Databricks table
 
 # COMMAND ----------
 
@@ -15,9 +20,10 @@
 # COMMAND ----------
 
 import requests
-from datetime import datetime
-from pyspark.sql.functions import col
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, ArrayType
+from datetime import datetime, timedelta
+from pyspark.sql.functions import col, trim, unix_timestamp, current_timestamp
+from pyspark.sql import Row
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, ArrayType, DoubleType, LongType, BooleanType, FloatType, DayTimeIntervalType
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import urllib.parse
 
@@ -32,6 +38,18 @@ import urllib.parse
 AIRTABLE_BASE_ID = "app1jXoB1g13R9iOl"  # Triage Tool Prototype
 AIRTABLE_DEV_TABLE_ID = "tblFp0tXA3YOJGjMo"  # Demotions_DatabricksSync_Dev
 
+# Reference table IDs (same as prod - read-only)
+HALT_CODES_TABLE_ID = 'tblN8uu4Gl1eDZMLs'
+DEMOTION_REASONS_TABLE_ID = 'tblINqDuMCUehLzgj'
+JIRA_JRM_SCRUM_BOARD_SYNC_TABLE_ID = 'tbllaxeplHp2Jmrw6'
+TEAM_MEMBERS_TABLE_ID = 'tblHQdtGEVbhNRWMR'
+ERC_TABLE_ID = 'tblgvlFdCWixrylVF'
+MACHINE_INFORMATION_TABLE_ID = 'tblW8Zbo7GVQMkVdC'
+
+# Databricks Configuration - DEV TABLE
+DEV_TABLE = "jupiter_dev.brianm.demotion_context_dev"
+SOURCE_TABLE = "jupiter_prod.jfa_metrics.demotions_stops_hours"  # Read-only source
+
 # Try multiple secret scopes (in order of preference)
 def get_airtable_token():
     scopes_to_try = [
@@ -42,22 +60,15 @@ def get_airtable_token():
     ]
     for scope in scopes_to_try:
         try:
-            return dbutils.secrets.get(scope=scope, key="AIRTABLE_TOKEN")
+            token = dbutils.secrets.get(scope=scope, key="AIRTABLE_TOKEN")
+            print(f"Using AIRTABLE_TOKEN from scope: {scope}")
+            return token
         except Exception as e:
             print(f"Could not access scope {scope}: {e}")
             continue
     raise Exception("No accessible secrets scope found with AIRTABLE_TOKEN")
 
 AIRTABLE_TOKEN = get_airtable_token()
-
-# Reference table IDs
-HALT_CODES_TABLE_ID = 'tblN8uu4Gl1eDZMLs'
-DEMOTION_REASONS_TABLE_ID = 'tblINqDuMCUehLzgj'
-JIRA_JRM_SCRUM_BOARD_SYNC_TABLE_ID = 'tbllaxeplHp2Jmrw6'
-TEAM_MEMBERS_TABLE_ID = 'tblHQdtGEVbhNRWMR'
-
-# Databricks Configuration - DEV TABLE
-DEV_TABLE = "jupiter_dev.brianm.demotion_context_dev"
 
 # COMMAND ----------
 
@@ -97,6 +108,19 @@ def get_airtable_data(table_id: str, limit: int = 10000, formula: str = None) ->
     
     return all_records
 
+def safe_timestamp_format(timestamp, format="%Y-%m-%dT%H:%M:%S.%f") -> str:
+    """Convert timestamp to Airtable-compatible format."""
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    return timestamp.strftime(format)[:-3] + "Z"
+
+def convert_to_string_or_none(value):
+    if value is None or value == "None":
+        return None
+    return f"{value}"
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -104,10 +128,17 @@ def get_airtable_data(table_id: str, limit: int = 10000, formula: str = None) ->
 
 # COMMAND ----------
 
+print("Building reference mappings...")
+
 def build_halt_code_mapping() -> dict:
-    """Build mapping of halt code record ID -> halt code value."""
+    """Build mapping of halt code value -> record ID."""
     records = get_airtable_data(HALT_CODES_TABLE_ID)
-    return {r["id"]: r["fields"].get("Halt Code") for r in records}
+    return {r["fields"].get("Halt Code"): r["id"] for r in records if r["fields"].get("Halt Code")}
+
+def build_halt_code_name_mapping() -> dict:
+    """Build mapping of halt code record ID -> code name."""
+    records = get_airtable_data(HALT_CODES_TABLE_ID)
+    return {r["id"]: r["fields"].get("Code Name") for r in records}
 
 def build_demotion_reason_mapping() -> dict:
     """Build mapping of demotion reason record ID -> reason name."""
@@ -124,113 +155,132 @@ def build_reviewer_mapping() -> dict:
     records = get_airtable_data(TEAM_MEMBERS_TABLE_ID)
     return {r["id"]: r["fields"].get("Name") for r in records}
 
-print("Building reference mappings...")
-halt_code_mapping = build_halt_code_mapping()
-demotion_reason_mapping = build_demotion_reason_mapping()
+def build_erc_mapping() -> dict:
+    """Build mapping of ERC value -> record ID."""
+    records = get_airtable_data(ERC_TABLE_ID)
+    return {r["fields"].get("ERC"): r["id"] for r in records if r["fields"].get("ERC")}
+
+def build_vin_mapping() -> dict:
+    """Build mapping of VIN -> record ID from machine_information."""
+    records = get_airtable_data(MACHINE_INFORMATION_TABLE_ID, limit=5000)
+    return {r["fields"].get("VIN"): r["id"] for r in records if r["fields"].get("VIN")}
+
+# Build all mappings
+halt_code_mapping = build_halt_code_mapping()  # halt_code -> record_id
+halt_code_name_mapping = build_halt_code_name_mapping()  # record_id -> code_name
+swapped_halt_code_mapping = {v: k for k, v in halt_code_mapping.items()}  # record_id -> halt_code
+demotion_reason_mapping = build_demotion_reason_mapping()  # record_id -> reason_name
+swapped_demotion_reason_mapping = {v: k for k, v in demotion_reason_mapping.items()}  # reason_name -> record_id
 jira_mapping = build_jira_mapping()
 reviewer_mapping = build_reviewer_mapping()
-print(f"Loaded: {len(halt_code_mapping)} halt codes, {len(demotion_reason_mapping)} demotion reasons, {len(jira_mapping)} jira issues, {len(reviewer_mapping)} reviewers")
+erc_mapping = build_erc_mapping()
+vin_mapping = build_vin_mapping()
+
+print(f"Loaded: {len(halt_code_mapping)} halt codes, {len(demotion_reason_mapping)} demotion reasons, {len(jira_mapping)} jira issues, {len(reviewer_mapping)} reviewers, {len(vin_mapping)} VINs")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Column Mapping Definition
 # MAGIC 
-# MAGIC This is the core mapping that defines which Airtable columns sync to Databricks.
+# MAGIC This is the core mapping that defines which columns sync between Airtable and Databricks.
 # MAGIC **To test removing a column: Comment it out or delete it from this list.**
 
 # COMMAND ----------
 
 # COLUMN MAPPING: Airtable Field Name -> Databricks Column Name
 # Comment out or delete rows to test column removal
+# Direction: "both" = synced in both directions, "at_to_dbx" = Airtable to DBX only, "dbx_to_at" = DBX to Airtable only
+
 COLUMN_MAPPING = {
     # === CRITICAL IDENTIFIERS (DO NOT REMOVE) ===
-    "A_UID": "a_uid",
-    "Timestamp UTC": "timestamp_utc",
-    "VIN": "vin",
-    "Bundle": "bundle",
+    "A_UID": {"dbx_col": "a_uid", "direction": "both"},
+    "Timestamp UTC": {"dbx_col": "timestamp_utc", "direction": "both"},
+    "VIN": {"dbx_col": "vin", "direction": "both"},
+    "Bundle": {"dbx_col": "bundle", "direction": "both"},
     
     # === TRIAGE RESULTS (Airtable → DBX) ===
-    "Demotion Reason": "demotion_reason",  # Linked field - needs lookup
-    "Triage Status": "triage_status",
-    "Triage Review Complete": "triage_review_complete",
-    "Triage Activities Complete": "triage_activities_complete",
-    "Investigation Complete": "investigation_complete",
-    "Triage Comments - If questions/unusual observations during Triage": "triage_comments",
-    "Reviewer": "triage_reviewer",  # Linked field - needs lookup
-    "In Scope": "in_scope",
+    "Demotion Reason": {"dbx_col": "demotion_reason", "direction": "at_to_dbx", "linked": "demotion_reason"},
+    "Triage Status": {"dbx_col": "triage_status", "direction": "at_to_dbx"},
+    "Triage Review Complete": {"dbx_col": "triage_review_complete", "direction": "at_to_dbx"},
+    "Triage Activities Complete": {"dbx_col": "triage_activities_complete", "direction": "at_to_dbx"},
+    "Investigation Complete": {"dbx_col": "investigation_complete", "direction": "at_to_dbx"},
+    "Triage Comments - If questions/unusual observations during Triage": {"dbx_col": "triage_comments", "direction": "at_to_dbx"},
+    "Reviewer": {"dbx_col": "triage_reviewer", "direction": "at_to_dbx", "linked": "reviewer"},
+    "In Scope": {"dbx_col": "in_scope", "direction": "at_to_dbx"},
     
     # === HALT CODE DATA ===
-    "Halt Code - Import": "halt_code_import",
-    "MAIN Demotion Code": "main_demotion_code",  # Linked field - needs lookup
-    "MAIN Demotion Reason": "main_demotion_reason",  # Linked field - needs lookup
-    "Halt Code Investigation Guide": "halt_code_investigation_guide",  # Lookup field
-    "Halt Description": "halt_description",  # Lookup field
+    "Halt Code - Import": {"dbx_col": "halt_code", "direction": "dbx_to_at"},
+    "Halt Code - Linked": {"dbx_col": "halt_code_linked", "direction": "dbx_to_at", "linked": "halt_code"},
+    "MAIN Demotion Code": {"dbx_col": "main_demotion_code", "direction": "at_to_dbx", "linked": "halt_code"},
+    "MAIN Demotion Reason": {"dbx_col": "main_demotion_reason", "direction": "at_to_dbx", "linked": "demotion_reason"},
+    "Halt Code Investigation Guide": {"dbx_col": "halt_code_investigation_guide", "direction": "at_to_dbx", "lookup": True},
+    "Halt Description": {"dbx_col": "halt_description", "direction": "at_to_dbx", "lookup": True},
     
     # === SECONDARY DEMOTION ===
-    "Secondary Demotion Manual": "secondary_demotion",  # Linked field - needs lookup
-    "Secondary Demotion Auto": "secondary_demotion_auto",  # Array
-    "Secondary Demotion Reason": "secondary_demotion_reason",  # Linked field - needs lookup
-    "Manual Demotion Masking": "manual_demotion_masking",
+    "Secondary Demotion Manual": {"dbx_col": "secondary_demotion", "direction": "at_to_dbx", "linked": "halt_code"},
+    "Secondary Demotion Auto": {"dbx_col": "secondary_demotion_auto", "direction": "both", "array": True},
+    "Secondary Demotion Reason": {"dbx_col": "secondary_demotion_reason", "direction": "at_to_dbx", "linked": "demotion_reason"},
+    "Manual Demotion Masking": {"dbx_col": "manual_demotion_masking", "direction": "at_to_dbx"},
     
     # === PRECEDING STOP ===
-    "Preceding Stop Code": "preceding_stop_code",  # Linked field - needs lookup
-    "Preceding Stop Datetime (UTC)": "preceding_stop_datetime_utc",
-    "Preceding Stop Code Reason": "preceding_stop_code_reason",  # Linked field - needs lookup
-    "Preceding Stop Code Error": "preceding_stop_code_error",
+    "Preceding Stop Code": {"dbx_col": "preceding_stop_code", "direction": "both", "linked": "halt_code"},
+    "Preceding Stop Datetime (UTC)": {"dbx_col": "preceding_stop_datetime_utc", "direction": "dbx_to_at"},
+    "Preceding Stop Code Reason": {"dbx_col": "preceding_stop_code_reason", "direction": "at_to_dbx", "linked": "demotion_reason"},
+    "Preceding Stop Code Error": {"dbx_col": "preceding_stop_code_error", "direction": "dbx_to_at"},
     
     # === HEADLANDS DATA ===
-    "Headlands vs Interior": "headlands_vs_interior",
-    "Headlands Turn": "headlands_turn",
-    "Implement Path Position Type Text": "implement_path_position_type_text",
-    "Computed Implement Path Position Type Text": "computed_implement_path_position_type_text",
-    "Implement Path Position Type": "implement_path_position_type",
-    "Implement Path Position Heading": "implement_path_position_heading",
-    "Implement Path Position Direction": "implement_path_position_direction",
+    "Headlands vs Interior": {"dbx_col": "headlands_vs_interior", "direction": "at_to_dbx"},
+    "Headlands Turn": {"dbx_col": "headlands_turn", "direction": "at_to_dbx"},
+    "Implement Path Position Type Text": {"dbx_col": "implement_path_position_type_text", "direction": "both"},
+    "Computed Implement Path Position Type Text": {"dbx_col": "computed_implement_path_position_type_text", "direction": "both"},
+    "Implement Path Position Type": {"dbx_col": "implement_path_position_type", "direction": "dbx_to_at"},
+    "Implement Path Position Heading": {"dbx_col": "implement_path_position_heading", "direction": "dbx_to_at"},
+    "Implement Path Position Direction": {"dbx_col": "implement_path_position_direction", "direction": "dbx_to_at"},
     
     # === PERCEPTION/SPARK DATA ===
-    "Spark Program Name": "spark_program_name",
-    "Spark Response": "spark_response",
-    "Spark Original Annotation 0 Label": "spark_original_annotation_0_label",
-    "Spark Annotation 0 Label": "spark_annotation_0_label",
-    "Spark Camera Name": "spark_camera_name",
-    "No of Spark Engagements": "no_of_spark_engagements",
-    "SparkAI Query URL": "sparkai_query_url",
-    "Other SparkAI URL": "other_sparkai_url",  # Array
+    "Spark Program Name": {"dbx_col": "spark_program_name", "direction": "dbx_to_at"},
+    "Spark Response": {"dbx_col": "spark_response", "direction": "dbx_to_at"},
+    "Spark Original Annotation 0 Label": {"dbx_col": "spark_original_annotation_0_label", "direction": "dbx_to_at"},
+    "Spark Annotation 0 Label": {"dbx_col": "spark_annotation_0_label", "direction": "dbx_to_at"},
+    "Spark Camera Name": {"dbx_col": "spark_camera_name", "direction": "dbx_to_at"},
+    "No of Spark Engagements": {"dbx_col": "no_of_spark_engagements", "direction": "dbx_to_at"},
+    "SparkAI Query URL": {"dbx_col": "sparkai_query_url", "direction": "dbx_to_at"},
+    "Other SparkAI URL": {"dbx_col": "other_sparkai_url", "direction": "dbx_to_at", "array": True},
+    "Spark URL": {"dbx_col": "spark_url", "direction": "dbx_to_at"},
     
     # === TRIAGE CLASSIFICATIONS ===
-    "Operator Error or Misuse": "operator_error_or_misuse",
-    "Bug or Intended Behavior": "bug_or_intended_behavior",
-    "Vehicle/Object Outside Field": "vehicle_or_object_outside_field",
-    "Vehicle Parked/Driving": "vehicle_parked_or_driving",
-    "Vehicle On/Off Road": "vehicle_on_or_off_road",
-    "Human Detection Details": "human_detection_details",
-    "Confirmed Demotion Type": "confirmed_demotion_type",  # Array
-    "Manned Type": "manned_type",
-    "MTBI Bucket": "mtbi_bucket",  # Array
+    "Operator Error or Misuse": {"dbx_col": "operator_error_or_misuse", "direction": "at_to_dbx"},
+    "Bug or Intended Behavior": {"dbx_col": "bug_or_intended_behavior", "direction": "at_to_dbx"},
+    "Vehicle/Object Outside Field": {"dbx_col": "vehicle_or_object_outside_field", "direction": "at_to_dbx"},
+    "Vehicle Parked/Driving": {"dbx_col": "vehicle_parked_or_driving", "direction": "at_to_dbx"},
+    "Vehicle On/Off Road": {"dbx_col": "vehicle_on_or_off_road", "direction": "at_to_dbx"},
+    "Human Detection Details": {"dbx_col": "human_detection_details", "direction": "at_to_dbx"},
+    "Confirmed Demotion Type": {"dbx_col": "confirmed_demotion_type", "direction": "at_to_dbx", "array": True},
+    "Manned Type": {"dbx_col": "manned_type", "direction": "at_to_dbx"},
+    "MTBI Bucket": {"dbx_col": "mtbi_bucket", "direction": "dbx_to_at", "array": True},
     
     # === JIRA INTEGRATION ===
-    "Confirmed JRM Link": "confirmed_jrm_link",  # Linked field - needs lookup
-    "Confirmed Jira URL": "confirmed_jira_url",
+    "Confirmed JRM Link": {"dbx_col": "confirmed_jrm_link", "direction": "at_to_dbx", "linked": "jira"},
+    "Confirmed Jira URL": {"dbx_col": "confirmed_jira_url", "direction": "at_to_dbx"},
     
     # === URLS ===
-    "Map pre-signed URL": "map_presigned_url",
-    "Foxglove URL": "foxglove_url",
-    "Spark URL": "spark_url",
+    "Map pre-signed URL": {"dbx_col": "map_presigned_url", "direction": "dbx_to_at"},
+    "Foxglove URL": {"dbx_col": "foxglove_url", "direction": "dbx_to_at"},
     
     # === MACHINE DATA ===
-    "genos_version": "genos_version",
-    "Seconds in Autonomy Time Before Demotion": "seconds_in_autonomy_time_before_demotion",
-    "Seconds In State 5 And 6": "seconds_in_state_5_and_6",
-    "camera_name": "camera_name",
+    "genos_version": {"dbx_col": "genos_version", "direction": "dbx_to_at"},
+    "Seconds in Autonomy Time Before Demotion": {"dbx_col": "seconds_in_autonomy_time_before_demotion", "direction": "dbx_to_at"},
+    "Seconds In State 5 And 6": {"dbx_col": "seconds_in_state_5_and_6", "direction": "dbx_to_at"},
+    "camera_name": {"dbx_col": "camera_name", "direction": "dbx_to_at"},
     
     # === DEPRECATED (Remove after testing) ===
-    "From State": "from_state",
-    "To State": "to_state",
-    "Demotion Occurrence": "demotion_occurrence",
-    "InOrbit URL": "inorbit_url",
-    "Demotions": "demotions",
-    "(Archived) Demotion Machine Behavior": "demotion_machine_behavior",
+    "From State": {"dbx_col": "from_state", "direction": "dbx_to_at"},
+    "To State": {"dbx_col": "to_state", "direction": "dbx_to_at"},
+    "Demotion Occurrence": {"dbx_col": "demotion_occurrence", "direction": "dbx_to_at"},
+    "InOrbit URL": {"dbx_col": "inorbit_url", "direction": "dbx_to_at"},
+    "Demotions": {"dbx_col": "demotions", "direction": "dbx_to_at"},
+    "(Archived) Demotion Machine Behavior": {"dbx_col": "demotion_machine_behavior", "direction": "at_to_dbx"},
 }
 
 print(f"Column mapping defined: {len(COLUMN_MAPPING)} columns")
@@ -238,7 +288,173 @@ print(f"Column mapping defined: {len(COLUMN_MAPPING)} columns")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Transform Airtable Records
+# MAGIC ## Part 1: DBX → Airtable (Push New Demotions)
+
+# COMMAND ----------
+
+def get_new_demotions(limit: int = 100):
+    """Get new demotions from demotions_stops_hours that aren't in our dev table yet."""
+    # For dev, we'll get recent demotions from the last 7 days
+    query = f"""
+        SELECT dsh.*
+        FROM {SOURCE_TABLE} AS dsh
+        LEFT JOIN {DEV_TABLE} dc 
+            ON dsh.vin = dc.vin 
+            AND dsh.timestamp_utc = dc.timestamp_utc 
+            AND dsh.demotions = 1
+        WHERE dsh.timestamp_utc >= date_sub(current_date(), 7)
+        AND dsh.demotions = 1 
+        AND dsh.halt_code != '0.0'
+        AND dc.vin IS NULL
+        LIMIT {limit}
+    """
+    return spark.sql(query)
+
+def create_halt_code_if_needed(halt_code: str, halt_name: str = None, halt_description: str = None) -> str:
+    """Create a halt code record if it doesn't exist, return record ID."""
+    if halt_code in halt_code_mapping:
+        return halt_code_mapping[halt_code]
+    
+    # Parse ERC and supplement code
+    parts = str(halt_code).split(".")
+    if len(parts) != 2:
+        print(f"Invalid halt code format: {halt_code}")
+        return None
+    
+    erc_value = int(parts[0])
+    supplement_code = int(parts[1])
+    
+    erc_id = erc_mapping.get(erc_value)
+    if not erc_id:
+        print(f"ERC {erc_value} not found in mapping")
+        return None
+    
+    payload = {
+        "records": [{
+            "fields": {
+                "ERC": [erc_id],
+                "Supplement Code": supplement_code,
+                "Demotion Reason_Old": ["recBuyNxcnrReNpJ0"],  # DR-10 Unassigned
+            }
+        }],
+        "typecast": True,
+    }
+    
+    if halt_name:
+        payload["records"][0]["fields"]["Code Name"] = halt_name
+    if halt_description:
+        payload["records"][0]["fields"]["Description"] = halt_description
+    
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    
+    response = requests.post(
+        f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{HALT_CODES_TABLE_ID}",
+        headers=headers,
+        json=payload
+    )
+    
+    if response.status_code == 200:
+        record_id = response.json()["records"][0]["id"]
+        halt_code_mapping[halt_code] = record_id
+        print(f"Created halt code {halt_code} -> {record_id}")
+        return record_id
+    else:
+        print(f"Failed to create halt code {halt_code}: {response.text}")
+        return None
+
+def push_to_airtable(demotions_df, batch_size: int = 10):
+    """Push new demotions to Airtable dev table."""
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    
+    records = demotions_df.collect()
+    print(f"Pushing {len(records)} records to Airtable...")
+    
+    success_count = 0
+    for i in range(0, len(records), batch_size):
+        batch = records[i:i+batch_size]
+        payload = {
+            "records": [],
+            "typecast": True,
+            "performUpsert": {
+                "fieldsToMergeOn": ["A_UID"]
+            },
+        }
+        
+        for row in batch:
+            row_dict = row.asDict()
+            
+            # Build A_UID
+            a_uid = f"{row_dict.get('vin')} | {row_dict.get('timestamp_utc')}"
+            
+            # Get halt code record ID
+            halt_code = str(row_dict.get('halt_code', ''))
+            halt_code_id = halt_code_mapping.get(halt_code)
+            if not halt_code_id and halt_code:
+                halt_code_id = create_halt_code_if_needed(
+                    halt_code, 
+                    row_dict.get('halt_name'),
+                    row_dict.get('halt_description')
+                )
+            
+            # Get VIN link
+            vin = row_dict.get('vin')
+            vin_link = [vin_mapping[vin]] if vin and vin in vin_mapping else []
+            
+            record = {
+                "fields": {
+                    "A_UID": a_uid,
+                    "VIN": vin,
+                    "Bundle": row_dict.get('bundle'),
+                    "Halt Code - Import": halt_code,
+                    "Halt Code - Linked": [halt_code_id] if halt_code_id else [],
+                    "From State": convert_to_string_or_none(row_dict.get('from_state')),
+                    "To State": convert_to_string_or_none(row_dict.get('to_state')),
+                    "Spark URL": row_dict.get('sparkai_url') or '',
+                    "Foxglove URL": row_dict.get('foxglove_url'),
+                    "Timestamp UTC": safe_timestamp_format(row_dict.get('timestamp_utc')),
+                    "Map pre-signed URL": row_dict.get('map_presigned_url'),
+                    "Pilot VINs Linked": vin_link,
+                    "Demotion Occurrence": row_dict.get('demotion_occurrence'),
+                    "demotions": 1,
+                }
+            }
+            
+            # Add optional fields if present
+            if row_dict.get('latitude'):
+                record["fields"]["latitude"] = row_dict.get('latitude')
+            if row_dict.get('longitude'):
+                record["fields"]["longitude"] = row_dict.get('longitude')
+            if row_dict.get('genos_version'):
+                record["fields"]["genos_version"] = row_dict.get('genos_version')
+            
+            payload["records"].append(record)
+        
+        # Send batch
+        response = requests.post(
+            f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_DEV_TABLE_ID}",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            success_count += len(batch)
+            print(f"Pushed batch {i//batch_size + 1}: {len(batch)} records")
+        else:
+            print(f"Failed batch {i//batch_size + 1}: {response.text}")
+    
+    print(f"Successfully pushed {success_count}/{len(records)} records to Airtable")
+    return success_count
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Part 2: Airtable → DBX (Pull Triage Results)
 
 # COMMAND ----------
 
@@ -251,64 +467,88 @@ def resolve_linked_field(record_fields: dict, field_name: str, mapping: dict) ->
         return mapping.get(linked_ids[0])
     return mapping.get(linked_ids)
 
-def resolve_linked_field_array(record_fields: dict, field_name: str, mapping: dict) -> list:
-    """Resolve a linked record field to array of values."""
-    linked_ids = record_fields.get(field_name)
-    if not linked_ids:
-        return None
-    if isinstance(linked_ids, list):
-        return [mapping.get(lid) for lid in linked_ids if mapping.get(lid)]
-    return [mapping.get(linked_ids)] if mapping.get(linked_ids) else None
-
-def transform_record(record: dict) -> dict:
+def transform_airtable_record(record: dict) -> dict:
     """Transform an Airtable record to Databricks row format."""
     fields = record.get("fields", {})
     airtable_id = record.get("id")
     
     row = {"airtable_id": airtable_id}
     
-    for at_field, dbx_col in COLUMN_MAPPING.items():
+    for at_field, config in COLUMN_MAPPING.items():
+        dbx_col = config["dbx_col"]
+        direction = config.get("direction", "both")
+        
+        # Skip fields that only go DBX -> Airtable
+        if direction == "dbx_to_at":
+            continue
+        
         value = fields.get(at_field)
         
-        # Handle linked record fields that need lookup
-        if at_field == "Demotion Reason":
+        # Handle linked record fields
+        if config.get("linked") == "demotion_reason":
             value = resolve_linked_field(fields, at_field, demotion_reason_mapping)
-        elif at_field == "MAIN Demotion Reason":
-            value = resolve_linked_field(fields, at_field, demotion_reason_mapping)
-        elif at_field == "Secondary Demotion Reason":
-            value = resolve_linked_field(fields, at_field, demotion_reason_mapping)
-        elif at_field == "Preceding Stop Code Reason":
-            value = resolve_linked_field(fields, at_field, demotion_reason_mapping)
-        elif at_field == "MAIN Demotion Code":
-            value = resolve_linked_field(fields, at_field, halt_code_mapping)
-        elif at_field == "Secondary Demotion Manual":
-            value = resolve_linked_field(fields, at_field, halt_code_mapping)
-        elif at_field == "Preceding Stop Code":
-            value = resolve_linked_field(fields, at_field, halt_code_mapping)
-        elif at_field == "Confirmed JRM Link":
+        elif config.get("linked") == "halt_code":
+            value = resolve_linked_field(fields, at_field, swapped_halt_code_mapping)
+        elif config.get("linked") == "jira":
             value = resolve_linked_field(fields, at_field, jira_mapping)
-        elif at_field == "Reviewer":
+        elif config.get("linked") == "reviewer":
             value = resolve_linked_field(fields, at_field, reviewer_mapping)
-        elif at_field == "Halt Code Investigation Guide":
-            # Lookup field - take first value if array
+        elif config.get("lookup"):
+            # Lookup fields return arrays
             if isinstance(value, list) and len(value) > 0:
                 value = value[0]
-        elif at_field == "Halt Description":
-            # Lookup field - take first value if array
-            if isinstance(value, list) and len(value) > 0:
-                value = value[0]
-        elif at_field in ["Secondary Demotion Auto", "Other SparkAI URL", "Confirmed Demotion Type", "MTBI Bucket"]:
-            # Keep as array
-            pass
         
         row[dbx_col] = value
     
     return row
 
+def pull_from_airtable(limit: int = 500):
+    """Pull triage results from Airtable dev table."""
+    print(f"Fetching records from Airtable dev table (limit: {limit})...")
+    
+    # Filter to recent records (last 30 days)
+    formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'days') < 30"
+    records = get_airtable_data(AIRTABLE_DEV_TABLE_ID, limit=limit, formula=formula)
+    print(f"Fetched {len(records)} records from Airtable")
+    
+    if not records:
+        print("No records to sync")
+        return None
+    
+    # Transform records
+    rows = [transform_airtable_record(r) for r in records]
+    print(f"Transformed {len(rows)} records")
+    
+    # Add sync timestamp
+    sync_time = datetime.utcnow()
+    for row in rows:
+        row["synced_at"] = sync_time
+    
+    return rows
+
+def merge_to_dev_table(rows: list):
+    """Merge Airtable records into dev Databricks table."""
+    if not rows:
+        return
+    
+    df = spark.createDataFrame(rows)
+    df.createOrReplaceTempView("airtable_records")
+    
+    # Upsert by airtable_id
+    spark.sql(f"""
+        MERGE INTO {DEV_TABLE} AS target
+        USING airtable_records AS source
+        ON target.airtable_id = source.airtable_id
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    
+    print(f"Merged {len(rows)} records to {DEV_TABLE}")
+
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Create Dev Table
+# MAGIC ## Create Dev Table (if needed)
 
 # COMMAND ----------
 
@@ -318,7 +558,7 @@ def create_dev_table():
         CREATE TABLE IF NOT EXISTS {DEV_TABLE} (
             airtable_id STRING,
             a_uid STRING,
-            timestamp_utc STRING,
+            timestamp_utc TIMESTAMP,
             vin STRING,
             bundle STRING,
             demotion_reason STRING,
@@ -329,7 +569,8 @@ def create_dev_table():
             triage_comments STRING,
             triage_reviewer STRING,
             in_scope STRING,
-            halt_code_import STRING,
+            halt_code STRING,
+            halt_code_linked STRING,
             main_demotion_code STRING,
             main_demotion_reason STRING,
             halt_code_investigation_guide STRING,
@@ -339,7 +580,7 @@ def create_dev_table():
             secondary_demotion_reason STRING,
             manual_demotion_masking STRING,
             preceding_stop_code STRING,
-            preceding_stop_datetime_utc STRING,
+            preceding_stop_datetime_utc TIMESTAMP,
             preceding_stop_code_reason STRING,
             preceding_stop_code_error STRING,
             headlands_vs_interior STRING,
@@ -347,7 +588,7 @@ def create_dev_table():
             implement_path_position_type_text STRING,
             computed_implement_path_position_type_text STRING,
             implement_path_position_type STRING,
-            implement_path_position_heading STRING,
+            implement_path_position_heading FLOAT,
             implement_path_position_direction STRING,
             spark_program_name STRING,
             spark_response STRING,
@@ -357,6 +598,7 @@ def create_dev_table():
             no_of_spark_engagements INT,
             sparkai_query_url STRING,
             other_sparkai_url ARRAY<STRING>,
+            spark_url STRING,
             operator_error_or_misuse STRING,
             bug_or_intended_behavior STRING,
             vehicle_or_object_outside_field STRING,
@@ -370,7 +612,6 @@ def create_dev_table():
             confirmed_jira_url STRING,
             map_presigned_url STRING,
             foxglove_url STRING,
-            spark_url STRING,
             genos_version STRING,
             seconds_in_autonomy_time_before_demotion BIGINT,
             seconds_in_state_5_and_6 INT,
@@ -384,7 +625,7 @@ def create_dev_table():
             synced_at TIMESTAMP
         )
         USING DELTA
-        COMMENT 'Dev table for testing Airtable sync changes'
+        COMMENT 'Dev table for testing Airtable sync changes - mirrors demotion_context'
     """)
     print(f"Created/verified table: {DEV_TABLE}")
 
@@ -393,63 +634,47 @@ create_dev_table()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Run Sync
+# MAGIC ## Run Full Sync
 
 # COMMAND ----------
 
-def run_sync(limit: int = 100):
-    """Fetch records from Airtable dev table and sync to Databricks."""
-    print(f"Fetching records from Airtable dev table (limit: {limit})...")
+def run_full_sync(push_limit: int = 50, pull_limit: int = 500):
+    """Run bidirectional sync: push new demotions, pull triage results."""
+    print("=" * 60)
+    print("STARTING BIDIRECTIONAL SYNC")
+    print("=" * 60)
     
-    # Filter to recent records (last 7 days)
-    formula = "DATETIME_DIFF(NOW(),{Timestamp UTC}, 'days') < 7"
-    records = get_airtable_data(AIRTABLE_DEV_TABLE_ID, limit=limit, formula=formula)
-    print(f"Fetched {len(records)} records from Airtable")
+    # Part 1: Push new demotions to Airtable
+    print("\n--- Part 1: DBX -> Airtable (Push New Demotions) ---")
+    new_demotions = get_new_demotions(limit=push_limit)
+    if new_demotions.count() > 0:
+        push_to_airtable(new_demotions)
+    else:
+        print("No new demotions to push")
     
-    if not records:
-        print("No records to sync")
-        return
+    # Part 2: Pull triage results from Airtable
+    print("\n--- Part 2: Airtable -> DBX (Pull Triage Results) ---")
+    rows = pull_from_airtable(limit=pull_limit)
+    if rows:
+        merge_to_dev_table(rows)
     
-    # Transform records
-    rows = [transform_record(r) for r in records]
-    print(f"Transformed {len(rows)} records")
-    
-    # Add sync timestamp
-    from datetime import datetime
-    sync_time = datetime.utcnow()
-    for row in rows:
-        row["synced_at"] = sync_time
-    
-    # Create DataFrame and write
-    df = spark.createDataFrame(rows)
-    
-    # Merge into table (upsert by airtable_id)
-    df.createOrReplaceTempView("new_records")
-    
-    spark.sql(f"""
-        MERGE INTO {DEV_TABLE} AS target
-        USING new_records AS source
-        ON target.airtable_id = source.airtable_id
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
-    """)
-    
-    print(f"Synced {len(rows)} records to {DEV_TABLE}")
-    
-    # Show sample
-    display(spark.sql(f"SELECT * FROM {DEV_TABLE} ORDER BY synced_at DESC LIMIT 5"))
+    print("\n" + "=" * 60)
+    print("SYNC COMPLETE")
+    print("=" * 60)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Execute Sync
 # MAGIC 
-# MAGIC Run the cell below to sync data from Airtable to Databricks.
+# MAGIC Run the cell below to perform bidirectional sync.
+# MAGIC - `push_limit`: Max new demotions to push to Airtable
+# MAGIC - `pull_limit`: Max records to pull from Airtable
 
 # COMMAND ----------
 
-# Run the sync (adjust limit as needed)
-run_sync(limit=500)
+# Run the full bidirectional sync
+run_full_sync(push_limit=50, pull_limit=500)
 
 # COMMAND ----------
 
@@ -463,7 +688,7 @@ display(spark.sql(f"SELECT COUNT(*) as total_records FROM {DEV_TABLE}"))
 
 # Check latest synced records
 display(spark.sql(f"""
-    SELECT airtable_id, a_uid, timestamp_utc, vin, triage_status, synced_at 
+    SELECT airtable_id, a_uid, vin, triage_status, investigation_complete, synced_at 
     FROM {DEV_TABLE} 
     ORDER BY synced_at DESC 
     LIMIT 10

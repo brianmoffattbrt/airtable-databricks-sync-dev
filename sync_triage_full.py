@@ -459,9 +459,11 @@ def sync_airtable_to_triage_full():
     print("Transforming records...")
     rows = records_to_spark_rows(records)
     
-    # Step 4: Create DataFrame
+    # Step 4: Create DataFrame with explicit schema (to handle all-None columns)
     print(f"Creating DataFrame with {len(rows)} rows...")
-    df = spark.createDataFrame(rows)
+    # Read schema from target table
+    target_schema = spark.table(DEMOTION_TRIAGE_FULL_TABLE).schema
+    df = spark.createDataFrame(rows, schema=target_schema)
     
     # Step 5: Write to table (use MERGE to upsert by airtable_record_id)
     # First, write to a temp table

@@ -4,7 +4,7 @@ This inventory distinguishes accepted configuration evidence, local implementati
 
 ## Repository history
 
-The foundation is the existing `brianmoffattbrt/airtable-databricks-sync-dev` repository, GitHub ID 1362874924, inspected on main at `a9e61158c26f5e1251d16bdee77c17ec4ff41681` with 17 commits beginning `e0b70ad`. The selected transfer destination is `BlueRiverTechnology/triage-workflows`, preserving identity/history. During preflight the source was public, without workflows, Pages, forks, stars, subscribers, rulesets, or protected main. These are observations, not immutable settings or proof transfer has occurred.
+The foundation is the existing `brianmoffattbrt/airtable-databricks-sync-dev` repository, GitHub ID 1362874924, inspected on main at `a9e61158c26f5e1251d16bdee77c17ec4ff41681` with 17 commits beginning `e0b70ad`. Brian subsequently approved a rename to `brianmoffattbrt/triage-workflows`, keeping work-account ownership and PUBLIC visibility, and explicitly approved public baseline publication. The rename was verified with the same repository ID and enabled secret scanning/push protection. No organization transfer or visibility change occurred. The original baseline tag retains the earlier private/company proposal as history; current decisions supersede it. Preflight reported no workflows, Pages, forks, stars, subscribers, rulesets, or protected main; those are observations, not immutable settings.
 
 The related code revision identifies tracked source, not the later uncommitted Markdown improvements imported during setup. The original working directories are retained; no source workspace or record has been changed to produce this curated baseline.
 

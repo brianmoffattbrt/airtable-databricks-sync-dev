@@ -4,9 +4,9 @@ This small register separates repository choices, proposed target contracts, and
 
 | ID | Decision | Status | Scope / consequence |
 |---|---|---|---|
-| R-01 | Evolve existing dev-sync history into BlueRiverTechnology/triage-workflows | APPROVED PLAN; execution tracked separately | One GitHub repository, not a disconnected replacement; preserve repository identity/history |
-| R-02 | Private initially, using the work account and organization-permitted route | APPROVED PLAN; remote mutation requires explicit checkpoint | Organization owners/inherited access may apply; no public push or collaborator invitation implied |
-| R-03 | Keep original local files and the existing DBX Git checkout | APPROVED | No workspace pull/re-link/rename/job execution during setup; future private-Git access is not newly validated |
+| R-01 | Rename the existing repository to brianmoffattbrt/triage-workflows under the same work account | APPLIED: rename verified, repository ID 1362874924 retained | Supersedes the organization-transfer proposal; one GitHub repository and unchanged history |
+| R-02 | Keep existing PUBLIC visibility and publish the reviewed baseline/tag | EXPLICITLY APPROVED by Brian | Supersedes private-first proposal; no visibility or protection changes. Secret scanning/push protection verified enabled after rename |
+| R-03 | Keep original local files and the existing DBX Git checkout | APPROVED | No workspace pull/re-link/rename/job execution during setup; no private-auth transition introduced; future refresh is not newly validated |
 | R-04 | Keep legacy notebook paths/content, isolate imported offline utilities | APPROVED | Root notebooks are compatibility entry points, not the new engine |
 | R-05 | Platform team owns the UI/media retrieval; this repo owns backend/contracts | APPROVED | No duplicate app import |
 | R-06 | Curate additions, preserve existing Git history | APPROVED | Redact unnecessary new incident/media examples; no retroactive history sanitization or raw export publication |

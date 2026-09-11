@@ -2,7 +2,7 @@
 
 A single project for replacing Airtable-dependent demotion triage with Databricks workflows and a platform-owned manual-review app.
 
-This project evolves the existing dev-sync repository and preserves its history. The selected company destination is `BlueRiverTechnology/triage-workflows`, private initially. Remote ownership/visibility changes require explicit confirmation; a local directory or this README does not establish that the transfer has occurred.
+This project evolves the existing dev-sync repository and preserves its history. Its GitHub home is [brianmoffattbrt/triage-workflows](https://github.com/brianmoffattbrt/triage-workflows), owned by Brian's work account and PUBLIC by explicit choice. The existing repository was renamed, not transferred or recreated; its identity/history and enabled secret scanning/push protection were preserved. The earlier company/private proposal is superseded.
 
 ## Start here
 
@@ -31,7 +31,7 @@ This project evolves the existing dev-sync repository and preserves its history.
 
 See [legacy context](docs/reference/legacy-context.md), [dev sync notes](docs/reference/legacy-dev-sync.md), [mapping distinctions](docs/reference/COLUMN_MAPPING.md), and [mirror limitations](docs/reference/DEMOTION_TRIAGE_FULL_ARCHITECTURE.md).
 
-The observed Databricks Git folder is `/Repos/brian.moffatt@bluerivertech.com/airtable-databricks-sync-dev`, on main at `a323693ecffc5964aaaedf6133579c081b3cbe96`. Setup preserves that checkout, not refreshes it. No direct matching job was found among 62 visible jobs; that does not prove no indirect/manual use. A future pull after private transfer may require organization-authorized Git access. Git folders/local checkouts are copies of one GitHub repository, not separate hosted projects.
+The observed Databricks Git folder is `/Repos/brian.moffatt@bluerivertech.com/airtable-databricks-sync-dev`, on main at `a323693ecffc5964aaaedf6133579c081b3cbe96`. Setup preserves that checkout, not refreshes it. No direct matching job was found among 62 visible jobs; that does not prove no indirect/manual use. The repository was renamed under the same owner without a visibility change. Its stored old URL and future refresh behavior have not been changed or tested here. Git folders/local checkouts are copies of one GitHub repository, not separate hosted projects.
 
 ## Offline utility verification
 
@@ -53,7 +53,7 @@ The tests use synthetic inputs and temporary local files. Do not run the audit C
 2. For a source correction or an actually applied Airtable change, update the as-is specification and record the evidence/date/scope. A proposal is not an applied change.
 3. For desired DBX/app behavior, update the target contract and relevant decision. Identify affected A-numbers/TPs, differences, and compatibility impact.
 4. When implementation is added, keep coupled code, contracts, documentation, and tests together. Coordinate breaking app fields/enums/keys with the platform team.
-5. Review diffs and privacy before committing/pushing; respect company review/security controls. No public publication, collaborator invitation, or policy bypass is implied by this README.
+5. Review diffs and privacy before committing/pushing; respect applicable review/security controls. Brian explicitly approved this curated baseline's public publication. That does not authorize publishing raw customer data or credentials, inviting collaborators, or bypassing protections.
 
 The annotated starting tag is `baseline-captured-triage`, created during baseline setup. It records captured A-X documentation plus explicitly draft manual/target contracts, not a production deployment.
 

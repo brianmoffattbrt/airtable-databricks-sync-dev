@@ -1,0 +1,5 @@
+/docs/** text eol=lf
+/tools/** text eol=lf
+/README.md text eol=lf
+/.gitignore text eol=lf
+/.gitattributes text eol=lf

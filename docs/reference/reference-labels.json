@@ -1,0 +1,27 @@
+{
+  "source": "Read-only list_records calls to production Demotion Reasons and Triage Processes during this A-39 census; labels are snapshots, not evidence of automation enabled state",
+  "base_id": "app1jXoB1g13R9iOl",
+  "reasons": {
+    "rec7xERvTtXgNpyoX": "DR-1 In-Cab Controls Override",
+    "rec8I8YbD46YPFPvz": "DR-8 Guidance & Geo",
+    "rec9EHPJoLSKTiULt": "DR-4 Perception Internal System Failure",
+    "recBuyNxcnrReNpJ0": "DR-10 Unassigned",
+    "recEx1iow2I9334qT": "DR-14 Machine Health",
+    "recKHnLfBdnQ6TZyb": "DR-9 Spark",
+    "recOCjt7uzqfmEi6e": "DR-7 Perception Image Quality",
+    "recQfc5glGhiKXEyy": "DR-13 Vehicle Operation Check",
+    "recUkxhCT5NRfkHSC": "DR-6 Gen4/VADC Misc Error",
+    "recYH2fUQWt0TMG2y": "DR-11 Operator Error",
+    "recfJoEBV6ujI0ujy": "DR-3 Perception \"Saw Something\"",
+    "recoH0xJfsnAdklyJ": "DR-2 Human-Triggered Demotion",
+    "recs2LFoUrgtfiGzn": "DR-12 Perception Configuration"
+  },
+  "processes": {
+    "recHwqiVE0JtIPAoH": "Automatic Intended Vehicle Demotion",
+    "recKg9pfcXXlLDeP1": " Headlands Assessment",
+    "recSbZgAM9dIsCMh4": "Automatic Unintended Perception Demotion",
+    "reccrwNXk5zBnkjMV": "Intended or Bugged Perception",
+    "recoTqFZ7aulm7SQA": "Automatic Non-Perception Demotion",
+    "recxfVQKIUHhWvNcE": "Determine Manual Masking"
+  }
+}

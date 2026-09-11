@@ -1,4 +1,40 @@
-# Demotion Triage Full - Architecture Document
+# Demotion Triage Mirror — Inspected Implementation and Design History
+
+## Implementation facts, not a completeness certificate
+
+The name `demotion_triage_full` describes a design goal. The inspected [sync_triage_full.py](../../sync_triage_full.py), at source revision `a9e61158c26f5e1251d16bdee77c17ec4ff41681`, is a limited dev implementation:
+
+1. Source is the same-base dev Airtable table `tblFp0tXA3YOJGjMo` in `app1jXoB1g13R9iOl`, not the captured production A-X table `tblSJItXuuUd0lyHP`.
+2. Destination is `jupiter_dev.brianm.demotion_triage_full`.
+3. `get_all_airtable_records(limit=100)` defaults to 100 records. `sync_airtable_to_triage_full()` calls it without overriding that limit. This does not establish a complete production-record mirror.
+4. `AIRTABLE_TO_SPARK_MAPPING` is a curated dictionary. `records_to_spark_rows` iterates that dictionary, not every field returned by Airtable; a schema change is not automatically documented or mapped.
+5. `transform_field_value` joins linked/lookup list elements into strings, keeps multiple-select lists as arrays, and reduces attachments to joined URLs. It does not preserve every original field representation or attachment attribute.
+6. A temporary table is overwritten, then the target is MERGEd by `airtable_record_id` with UPDATE SET * / INSERT *. The implementation is not the direct target-overwrite sketch retained below.
+7. `sync_timestamp` is a batch sync time, not the Airtable revision history. This is not a demonstrated complete per-field event-history/audit trail. It does not prove which automation wrote a value.
+8. An omitted mapped field becomes None; UPDATE SET * can affect existing mirrored values. This is not evidence a missing/deleted source field has zero impact.
+
+These are local source facts. Current deployed execution, complete populations, and historical correctness are not certified, and no notebook was executed for this documentation update.
+
+## Relationship to A-X documentation
+
+The [canonical captured automation specification](../as-is/automations.md) governs native rule settings and immediate dependencies. Every A-X output is automatic, even where inputs are supplied by a person. The mirror is a separate consumer, not proof of runtime equivalence or a substitute for the captured trigger/action graph.
+
+The inspected main sync already reads `Investigation Complete` and `Reviewer` into context fields. The old motivation claiming those process fields were not tracked in Databricks is not accurate for that inspected implementation. The mirror adds other mapped process fields, but broader field/row completeness must not be inferred from its name.
+
+See [COLUMN_MAPPING.md](COLUMN_MAPPING.md) for first-element name/code resolution in the main sync versus joined IDs in this mirror. These representations and destinations are different contracts.
+
+## Design and operational limits
+
+- A future full-fidelity production mirror, event history, direct-write triage replacement, or table redesign requires a separate specification and approval.
+- The historical schema, completion checkmarks, deletion history, and cleanup backlog below are retained observations/proposals with their original limitations, not current integrity verification or deletion approval.
+- Separate dev primary tables do not isolate every path in the companion notebook; see the [legacy sync reference](legacy-dev-sync.md).
+- Do not run sync, delete a column, create a table, or replay records simply to validate the captured A-X documentation.
+
+<details>
+<summary>Historical architecture proposal, SQL/schema sketch, and dev-testing notes — not a verified production implementation</summary>
+
+Everything below is preserved design/history. Claims such as complete mirror, ALL columns, Complete Audit Trail, ready, verified, or safe to remove are not newly established facts. The qualified implementation description above supersedes contradictory wording; original SQL/Python examples and comments are retained unchanged and are not execution instructions.
+
 
 ## Overview
 
@@ -240,3 +276,5 @@ Columns that need sync code changes before deletion:
 | Other SparkAI URL | 2026-09-09 | ✅ Sync works |
 | Spark URL | 2026-09-09 | ✅ Sync works |
 | Autonomy state transition history | 2026-09-09 | ✅ Sync works |
+
+</details>

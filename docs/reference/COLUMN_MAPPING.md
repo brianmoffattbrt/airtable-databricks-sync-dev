@@ -1,4 +1,46 @@
-# Column Mapping Reference
+# Column Mapping Reference — Main Sync versus Dev Mirror
+
+## Authority and scope
+
+Use the [canonical A-X specification](../as-is/automations.md) for native automation settings and the [immediate dependency catalog](../as-is/automations.md#immediate-dependency-catalog) for original/MAIN/secondary reference lineage. The table below records inspected local implementation facts, not live deployment or complete migration equivalence.
+
+**Two different mappings must not be conflated:**
+- [sync_notebook_dev.py](../../sync_notebook_dev.py): inspect `cast_airtable_format_to_databricks`, `upload_to_temp_table`, `send_data_to_airtable`, and `update_airtable_demotions`. There is no COLUMN_MAPPING constant/section in this notebook.
+- [sync_triage_full.py](../../sync_triage_full.py): inspect `AIRTABLE_TO_SPARK_MAPPING`, `transform_field_value`, `records_to_spark_rows`, and `sync_airtable_to_triage_full`.
+
+Source revision inspected: `a9e61158c26f5e1251d16bdee77c17ec4ff41681`. Code type hints in the mirror mapping drive conversion; they are not independently authoritative Airtable schema types. For example, MAIN_SparkURL_Manual is a stored URL in the accepted schema while the mirror mapping uses a singleLineText conversion hint.
+
+## Immediate field representation differences
+
+| Airtable value | Main sync implementation | Dev mirror implementation |
+|---|---|---|
+| Record ID | `Airtable_ID` | `airtable_record_id` |
+| A_UID | Constructed as `VIN \| timestamp` for ingestion/upsert; do not infer a context `a_uid` column from the old table | Mapped to `a_uid` as stored text |
+| MAIN Demotion Code | First linked record resolved through `swapped_halt_code_records_mapping` into `main_demotion_code` | Linked IDs joined into string `main_demotion_code` |
+| Secondary Demotion Manual | First linked record resolved to `secondary_demotion` | Joined IDs in `secondary_demotion_manual` |
+| Preceding Stop Code | First link resolved in the context conversion, including `Preceding_Stop_Code` | Joined IDs in `preceding_stop_code` |
+| Reason lookup fields | First result resolved through reason mapping | Lookup list elements converted to a joined string, not the same resolved-name contract |
+| Confirmed JRM Link | First link resolved through `jira_issue_mapping` | Joined IDs in `confirmed_jrm_link` |
+| Reviewer | First link resolved to `triage_reviewer` | Joined IDs in `reviewer`; distinct from `headlands_reviewer` |
+| Confirmed Demotion Type | Multiple-select list read from Airtable | Multiple-select list retained, not joined as a linked field |
+| Investigation / activities / scope / operator / bug | Named field values read by the main conversion | Corresponding choice values mapped to strings |
+| Vehicle/Object Outside Field | `vehicle_or_object_outside_field` | `vehicle_object_outside_field` |
+| MAIN_SparkURL_Manual | Not a mapped input in the inspected main conversion; A-29 is a reader, not its producer | `main_sparkurl_manual` |
+| Misuse Check Required | Not a direct mapping in the inspected main notebook | `misuse_check_required`; lookup values are joined |
+
+These are immediate interfaces, not a complete source-to-reporting transformation audit. The mirror defaults to 100 records and uses a curated mapping; calling it full does not certify complete field/record/history coverage.
+
+## Removal and schema-change boundary
+
+**The former heading “NOT in Sync (Safe to Delete)” is withdrawn.** Absence from one mapping does not establish absence from another notebook, native automation, formula, interface, or manual workflow. `records_to_spark_rows` uses `fields.get`; omitted fields become None, and the mirror target MERGE uses UPDATE SET *. Missing-field tolerance is therefore not proof of no effect on previously stored values.
+
+Existing candidate lists, code/type labels, and version dates below are historical. They are not current deletion findings, nor authorization to delete fields even in dev/test. No live sync, schema mutation, new record census, or destructive test is needed for the bounded A-X documentation sign-off.
+
+<details>
+<summary>Historical mapping worksheet and removal instructions — superseded/unvalidated</summary>
+
+The following old tables mix purposes and representations and are retained only as historical context. Where they disagree, the named implementation and qualified mapping above govern the local-code facts; the canonical specification governs captured Airtable settings. Original operational instructions are not authorized by this documentation update.
+
 
 This document tracks which Airtable columns are synced in the **bidirectional** dev sync job.
 
@@ -165,3 +207,5 @@ These columns exist in Airtable but are NOT synced to Databricks:
 | Date | Change | By |
 |------|--------|-----|
 | 2025-01-13 | Initial sync setup | Brian |
+
+</details>

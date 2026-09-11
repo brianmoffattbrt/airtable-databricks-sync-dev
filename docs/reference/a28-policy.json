@@ -1,0 +1,36 @@
+{
+  "version": "A28_HEADLANDS_COMPLETE_OTHERWISE_V2",
+  "source": "User-supplied trigger/branch screenshots, explicit policy confirmation, and subsequent user statement that changes were published",
+  "publication_status": "User confirmed published; no automation API independently exposes the current definition",
+  "enabled": true,
+  "trigger_table": "Demotions_DatabricksSync",
+  "trigger_type": "When a record matches conditions",
+  "trigger_conditions_all": [
+    "MAIN Demotion Code has any of 12.35",
+    "Investigation Complete is Investigation Not Complete",
+    "Headlands Assessment Complete is Headlands Complete"
+  ],
+  "branches": [
+    {
+      "condition": "Headlands vs Interior is Headlands Pass",
+      "writes": {
+        "Operator Error or Misuse": "No Operator Error or Misuse",
+        "Bug or Intended Behavior": "Intended Behavior",
+        "Confirmed Demotion Type": "Intended Perception Demotion",
+        "Investigation Complete": "Investigation Complete"
+      }
+    },
+    {
+      "condition": "Otherwise, including Not Sure, blank or other non-Headlands-Pass values, only after trigger conditions are satisfied",
+      "writes": {
+        "Operator Error or Misuse": "No Operator Error or Misuse",
+        "Bug or Intended Behavior": "Known Bug",
+        "Confirmed Demotion Type": "Unintended Perception Demotion",
+        "Investigation Complete": "Investigation Complete"
+      }
+    }
+  ],
+  "policy_note": "Unknown headlands is deliberately classified as unintended perception only after the headlands assessment is marked complete; incomplete headlands assessment still waits.",
+  "limitations": ["Immutable automation ID and action destination selectors still not independently verified", "Other live writer definitions and run histories remain incomplete", "Publication does not establish backfill of existing matching records"],
+  "agent_production_writes": 0
+}
